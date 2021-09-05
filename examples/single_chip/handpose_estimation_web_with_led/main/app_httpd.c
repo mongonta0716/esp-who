@@ -12,6 +12,9 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 #include "app_httpd.h"
+#include "freertos/FreeRTOS.h"
+#include "freertos/task.h"
+#include "freertos/semphr.h"
 #include "esp_http_server.h"
 #include "esp_timer.h"
 #include "esp_camera.h"
@@ -22,6 +25,7 @@
 #include "sdkconfig.h"
 #include "app_mdns.h"
 #include "app_camera.h"
+#include "app_led.h"
 
 #if defined(ARDUINO_ARCH_ESP32) && defined(CONFIG_ARDUHAL_ESP_LOG)
 #include "esp32-hal-log.h"
@@ -47,7 +51,7 @@ static const char *TAG = "camera_httpd";
 
 #ifdef CONFIG_LED_ILLUMINATOR_ENABLED
 int led_duty = 0;
-bool isStreaming = false;
+bool isStreaming = true;
 #ifdef CONFIG_LED_LEDC_LOW_SPEED_MODE
 #define CONFIG_LED_LEDC_SPEED_MODE LEDC_LOW_SPEED_MODE
 #else
@@ -61,6 +65,7 @@ typedef struct
     size_t len;
 } jpg_chunking_t;
 
+static SemaphoreHandle_t query_lock = NULL;
 #define PART_BOUNDARY "123456789000000000000987654321"
 static const char *_STREAM_CONTENT_TYPE = "multipart/x-mixed-replace;boundary=" PART_BOUNDARY;
 static const char *_STREAM_BOUNDARY = "\r\n--" PART_BOUNDARY "\r\n";
@@ -71,7 +76,8 @@ httpd_handle_t camera_httpd = NULL;
 
 #if CONFIG_ESP_HAND_DETECT_ENABLED
 
-static int8_t detection_enabled = 0;
+static int8_t detection_enabled = 1;
+//static bool hand_detected = false;
 
 #if CONFIG_ESP_HAND_POSE_ESTIMATION_ENABLED
 static int8_t recognition_enabled = 0;
@@ -402,13 +408,19 @@ static esp_err_t stream_handler(httpd_req_t *req)
     isStreaming = true;
 #endif
 
+    BaseType_t xStatus;
+
     while (true)
     {
 #if CONFIG_ESP_HAND_DETECT_ENABLED
         detected = false;
 #endif
 
-        fb = esp_camera_fb_get();
+        xStatus = xSemaphoreTake(query_lock, portMAX_DELAY);
+        if (xStatus == pdTRUE) {
+            fb = esp_camera_fb_get();
+        }
+        xSemaphoreGive(query_lock);
         if (!fb)
         {
             ESP_LOGE(TAG, "Camera capture failed");
@@ -539,7 +551,8 @@ static esp_err_t stream_handler(httpd_req_t *req)
         }
         if (res != ESP_OK)
         {
-            break;
+            
+            //break;
         }
         int64_t hp_end = esp_timer_get_time();
 
@@ -569,6 +582,7 @@ static esp_err_t stream_handler(httpd_req_t *req)
                  (detected) ? "DETECTED " : ""
 #endif
         );
+        set_hand_detect(detected);
     }
 
 #ifdef CONFIG_LED_ILLUMINATOR_ENABLED
@@ -1015,6 +1029,13 @@ static esp_err_t monitor_handler(httpd_req_t *req)
 
 void app_httpd_main()
 {
+	query_lock = xSemaphoreCreateBinary();
+	if (query_lock == NULL) {
+        ESP_LOGE(TAG, "xSemaphoreCreateMutex() Failed");
+        return;
+	}
+	xSemaphoreGive(query_lock);
+
     httpd_config_t config = HTTPD_DEFAULT_CONFIG();
     config.max_uri_handlers = 12;
 

@@ -3,7 +3,7 @@
 # project subdirectory.
 #
 
-PROJECT_NAME := handpose_estimation_web
+PROJECT_NAME := handpose_estimation_web_with_led
 
 SOLUTION_PATH ?= $(abspath $(shell pwd))/../../..
 
