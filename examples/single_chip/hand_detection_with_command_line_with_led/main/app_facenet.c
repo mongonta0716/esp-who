@@ -27,6 +27,7 @@
 #include "freertos/task.h"
 #include "app_facenet.h"
 #include "sdkconfig.h"
+#include "app_led.h"
 
 static const char *TAG = "app_process";
 
@@ -73,10 +74,13 @@ void task_process (void *arg)
         {
             frame_num++;
             ESP_LOGI(TAG, "DETECTED: %d\n", frame_num);
+            set_hand_detect(true);
             dl_lib_free(net_boxes->score);
             dl_lib_free(net_boxes->box);
             dl_lib_free(net_boxes->cls);
             dl_lib_free(net_boxes);
+        } else {
+            set_hand_detect(false);
         }
 
         dl_matrix3du_free(image_matrix);

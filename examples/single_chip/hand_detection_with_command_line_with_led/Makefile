@@ -3,7 +3,7 @@
 # project subdirectory.
 #
 
-PROJECT_NAME := hand_detection_command_line
+PROJECT_NAME := hand_detection_command_line_with_led
 
 SOLUTION_PATH ?= $(abspath $(shell pwd))/../../..
 
