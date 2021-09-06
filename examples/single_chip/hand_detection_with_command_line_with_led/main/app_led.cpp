@@ -45,12 +45,17 @@ CRGB leds[NUM_LEDS];
 static bool change_status = false;
 
 static const uint32_t wait_led = 0;
-static const uint32_t wait_for_change = 2000;
+static const uint32_t wait_for_led_on  = 10000UL; // LEDが点灯している間の待ち時間
+static const uint32_t wait_for_led_off = 1000UL;  // LEDが消灯している間の待ち時間
+static uint32_t wait_for_change = wait_for_led_off;
+
+static uint32_t last_millis = 0;
 
 static void led_task(void* args) {
     BaseType_t xStatus; 
-    for (;;) {
+//    for (;;) {
         if (hand_detected == true and change_status == true) {
+            ESP_LOGI(TAG, "****************************************:LED on");
             for (int i=0; i<NUM_LEDS; i++) {
                 leds[i] = CRGB::AntiqueWhite;
                 xStatus = xSemaphoreTake(query_lock, portMAX_DELAY);
@@ -61,17 +66,22 @@ static void led_task(void* args) {
                 xSemaphoreGive(query_lock);
             }
             change_status = false;
+            wait_for_change = wait_for_led_on;
         } else if (hand_detected == false and change_status == true) { 
+            ESP_LOGI(TAG, "****************************************:LED off");
+            
             for (int i=0; i<NUM_LEDS; i++) {
                 leds[i] = CRGB::Black;
                 xStatus = xSemaphoreTake(query_lock, portMAX_DELAY);
                 if (xStatus == pdTRUE) {
+                    FastLED.clearData();
                     FastLED.show();
                 }
                 vTaskDelay(wait_led/portTICK_PERIOD_MS);
                 xSemaphoreGive(query_lock);
             }
             change_status = false;
+            wait_for_change = wait_for_led_off;
         } else {
             leds[0] = CRGB::HTMLColorCode::DarkBlue;
             xStatus = xSemaphoreTake(query_lock, portMAX_DELAY);
@@ -87,11 +97,16 @@ static void led_task(void* args) {
             FastLED.show();
             vTaskDelay(100/portTICK_PERIOD_MS);
         }
-        vTaskDelay(wait_for_change/portTICK_PERIOD_MS);
-    }
+//        vTaskDelay(wait_for_change/portTICK_PERIOD_MS);
+//    }
     vTaskDelete(NULL);
 }
 
+/*
+static unsigned long millis() { 
+    return (unsigned long)(esp_timer_get_time() / 1000ULL);
+}
+*/
 
 /*
 *  Public Functions
@@ -99,17 +114,28 @@ static void led_task(void* args) {
 
 extern "C" {
 
+
 void set_hand_detect(bool status) {
     if (last_hand_detected != status) {
-        ESP_LOGI(TAG, "hand_detected change:%s", (status) ? "true" : "false");
-        last_hand_detected = hand_detected;
-        hand_detected = status;
+        if ((millis() - last_millis) > wait_for_change) {
+            ESP_LOGI(TAG, "hand_detected change:%s", (status) ? "true" : "false");
+            last_hand_detected = hand_detected;
+            xTaskCreatePinnedToCore(led_task, "led_task", 2048, NULL, 5, NULL, 1);
+            last_millis = millis();
+            ESP_LOGI(TAG, "last_millis: %ld", (unsigned long)last_millis);
+        } 
         change_status = true;
+        hand_detected = status;
+    }
+    if (status) {
+        // 手が認識されていた場合、時間を伸ばす
+        last_millis = millis();
     }
 }
 
 void app_led_main()
 {	
+    last_millis = millis();
     FastLED.addLeds<WS2811, LED_PIN>(leds, NUM_LEDS);
 
     for (int i=0; i<NUM_LEDS; i++) {
@@ -129,7 +155,6 @@ void app_led_main()
         return;
 	}
 	xSemaphoreGive(query_lock);
-    xTaskCreatePinnedToCore(led_task, "led_task", 2048, NULL, 5, NULL, 1);
 
 }
 }// extern "C"
